@@ -1,0 +1,46 @@
+# Local builds and package caches
+/build/
+/build-native/
+/target/
+/.venv-*/
+/.vs/
+/.vscode/
+
+# Training output
+/checkpoints/
+/logs/
+/video_analysis/
+*.pt
+*.log
+*.tsv
+
+# Large machine-local SDKs (see README for the expected layout)
+/third_party/libtorch/
+/third_party/cuda118-sdk/
+
+# Generated Godot cache
+**/.godot/
+
+# Local media and archives
+*.mp4
+*.zip
+
+# Compiler/runtime output
+*.dll
+*.exe
+*.exp
+*.ilk
+*.lib
+*.obj
+*.pdb
+
+# RocketSimVis uses Wavefront OBJ assets (not compiler object files)
+!RocketSimVis/assets/models/*.obj
+
+# Unused nested development copy bundled in the visualizer archive
+/RocketSimVis/visualiser/
+
+# OS/editor noise
+Thumbs.db
+Desktop.ini
+.DS_Store

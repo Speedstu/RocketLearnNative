@@ -1,0 +1,66 @@
+[gd_scene load_steps=10 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/world/arena.tscn" id="1_arena"]
+[ext_resource type="PackedScene" path="res://scenes/entities/ball.tscn" id="2_ball"]
+[ext_resource type="PackedScene" path="res://scenes/camera/spectator_camera.tscn" id="3_camera"]
+[ext_resource type="Script" path="res://scripts/main.gd" id="4_main"]
+[ext_resource type="Script" path="res://scripts/network/rocket_sim_receiver.gd" id="5_receiver"]
+[ext_resource type="Script" path="res://scripts/arena/boost_pad_layout.gd" id="6_boost_pads"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_main"]
+sky_top_color = Color(0.18, 0.34, 0.56, 1)
+sky_horizon_color = Color(0.66, 0.75, 0.84, 1)
+ground_bottom_color = Color(0.12, 0.14, 0.17, 1)
+ground_horizon_color = Color(0.48, 0.54, 0.61, 1)
+
+[sub_resource type="Sky" id="Sky_main"]
+sky_material = SubResource("ProceduralSkyMaterial_main")
+
+[sub_resource type="Environment" id="Environment_main"]
+background_mode = 2
+sky = SubResource("Sky_main")
+ambient_light_source = 3
+ambient_light_color = Color(0.72, 0.78, 0.86, 1)
+ambient_light_energy = 0.62
+reflected_light_source = 2
+tonemap_mode = 2
+glow_enabled = true
+glow_intensity = 0.65
+glow_strength = 0.8
+glow_bloom = 0.08
+glow_hdr_threshold = 1.2
+glow_hdr_scale = 1.6
+ssao_enabled = true
+ssao_radius = 1.0
+ssao_intensity = 1.4
+ssao_power = 1.2
+
+[node name="Main" type="Node3D"]
+script = ExtResource("4_main")
+
+[node name="RocketSimReceiver" type="Node" parent="."]
+script = ExtResource("5_receiver")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_main")
+
+[node name="KeyLight" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-90, 0, 0)
+light_color = Color(1, 0.96, 0.88, 1)
+light_energy = 0.9
+light_angular_distance = 0.75
+shadow_enabled = true
+shadow_opacity = 0.6
+directional_shadow_max_distance = 160.0
+
+[node name="Arena" parent="." instance=ExtResource("1_arena")]
+
+[node name="BoostPads" type="Node3D" parent="."]
+script = ExtResource("6_boost_pads")
+
+[node name="Ball" parent="." instance=ExtResource("2_ball")]
+
+[node name="Cars" type="Node3D" parent="."]
+
+[node name="SpectatorCamera" parent="." node_paths=PackedStringArray("target") instance=ExtResource("3_camera")]
+target = NodePath("../Ball")
