@@ -6,7 +6,6 @@
 #include <RocketSim.h>
 #include <array>
 #include <random>
-#include <string>
 #include <vector>
 
 struct StepResult {
@@ -28,7 +27,6 @@ public:
     void observe(float* output) const;
     void action_masks(uint8_t* output, int action_count) const;
     StepResult step(const int64_t* actions, int action_count, uint64_t global_steps);
-    std::string rocketsimvis_json() const;
     static const std::vector<RocketSim::CarControls>& action_table();
 
 private:

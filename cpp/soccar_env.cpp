@@ -2,8 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <iomanip>
-#include <sstream>
 
 using namespace RocketSim;
 
@@ -221,61 +219,4 @@ StepResult SoccarEnv::step(const int64_t* actions, int action_count, uint64_t gl
     previous_ball_ = ball;
     if (result.done) reset(global_steps);
     return result;
-}
-
-std::string SoccarEnv::rocketsimvis_json() const {
-    std::ostringstream out;
-    out << std::setprecision(7);
-
-    auto vec = [&](const Vec& v) { out << '[' << v.x << ',' << v.y << ',' << v.z << ']'; };
-    auto phys = [&](const PhysState& state) {
-        out << "{\"pos\":";
-        vec(state.pos);
-        out << ",\"forward\":";
-        vec(state.rotMat.forward);
-        out << ",\"up\":";
-        vec(state.rotMat.up);
-        out << ",\"vel\":";
-        vec(state.vel);
-        out << ",\"ang_vel\":";
-        vec(state.angVel);
-        out << '}';
-    };
-
-    out << "{\"ball_phys\":";
-    phys(arena_->ball->GetState());
-    out << ",\"cars\":[";
-
-    for (int i = 0; i < 4; ++i) {
-        if (i) out << ',';
-        const auto car = cars_[i]->GetState();
-        out << "{\"team_num\":" << (cars_[i]->team == Team::BLUE ? 0 : 1) << ",\"phys\":";
-        phys(car);
-        out << ",\"controls\":{\"throttle\":" << cars_[i]->controls.throttle
-            << ",\"steer\":" << cars_[i]->controls.steer
-            << ",\"pitch\":" << cars_[i]->controls.pitch
-            << ",\"yaw\":" << cars_[i]->controls.yaw
-            << ",\"roll\":" << cars_[i]->controls.roll
-            << ",\"boost\":" << (cars_[i]->controls.boost ? "true" : "false")
-            << ",\"jump\":" << (cars_[i]->controls.jump ? "true" : "false")
-            << ",\"handbrake\":" << (cars_[i]->controls.handbrake ? "true" : "false") << '}'
-            << ",\"boost_amount\":" << car.boost / 100.f
-            << ",\"on_ground\":" << (car.isOnGround ? "true" : "false")
-            << ",\"has_flipped_or_double_jumped\":" << ((car.hasFlipped || car.hasDoubleJumped) ? "true" : "false")
-            << ",\"is_demoed\":" << (car.isDemoed ? "true" : "false") << '}';
-    }
-
-    const auto& pads = arena_->GetBoostPads();
-    out << "],\"boost_pad_locations\":[";
-    for (size_t i = 0; i < pads.size(); ++i) {
-        if (i) out << ',';
-        vec(pads[i]->config.pos);
-    }
-    out << "],\"boost_pad_states\":[";
-    for (size_t i = 0; i < pads.size(); ++i) {
-        if (i) out << ',';
-        out << (pads[i]->GetState().isActive ? "true" : "false");
-    }
-    out << "]}";
-    return out.str();
 }

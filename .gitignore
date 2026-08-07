@@ -18,8 +18,6 @@
 /third_party/libtorch/
 /third_party/cuda118-sdk/
 
-# Generated Godot cache
-**/.godot/
 
 # Local media and archives
 *.mp4
@@ -34,11 +32,7 @@
 *.obj
 *.pdb
 
-# RocketSimVis uses Wavefront OBJ assets (not compiler object files)
-!RocketSimVis/assets/models/*.obj
 
-# Unused nested development copy bundled in the visualizer archive
-/RocketSimVis/visualiser/
 
 # OS/editor noise
 Thumbs.db
