@@ -8,11 +8,8 @@ The repository contains one clean baseline: **standard Soccar 2v2 self-play**. T
 
 - `rocket_learn_native`: Soccar 2v2 PPO trainer.
 - `rocket_learn_evaluator`: deterministic 2v2 checkpoint evaluator.
-- `rocket_learn_visualizer`: UDP playback sender for the Python renderer.
-- `RocketSimVis`: public Python RocketSimVis submodule.
 - Rust supervisor for restart/log handling.
 
-The private renderer source is not part of the active project.
 
 ## Clone
 
@@ -41,19 +38,14 @@ BUILD_EVALUATOR.bat
 START_EVALUATOR.bat
 ```
 
-## Python RocketSimVis
 
 Install dependencies once:
 
 ```bat
-python -m pip install -r RocketSimVis\requirements.txt
 ```
 
 Then:
 
 ```bat
-BUILD_VISUALIZER.bat
-START_VISUALIZER.bat
 ```
 
-Playback uses the standard RocketSimVis JSON protocol over UDP port `9273`.

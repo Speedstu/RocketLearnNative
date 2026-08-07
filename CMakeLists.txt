@@ -28,12 +28,8 @@ add_executable(rocket_learn_evaluator
   cpp/soccar_env.cpp
 )
 
-add_executable(rocket_learn_visualizer
-  cpp/visualize_main.cpp
-  cpp/soccar_env.cpp
-)
 
-foreach(target rocket_learn_native rocket_learn_evaluator rocket_learn_visualizer)
+foreach(target rocket_learn_native rocket_learn_evaluator)
   target_include_directories(${target} PRIVATE
     cpp
     "${ROCKETSIM_DIR}/src"
@@ -68,9 +64,3 @@ target_link_libraries(rocket_learn_evaluator PRIVATE
   "${TORCH_ROOT}/lib/c10.lib"
 )
 
-target_link_libraries(rocket_learn_visualizer PRIVATE
-  RocketSim ws2_32
-  "${TORCH_ROOT}/lib/torch.lib"
-  "${TORCH_ROOT}/lib/torch_cpu.lib"
-  "${TORCH_ROOT}/lib/c10.lib"
-)
