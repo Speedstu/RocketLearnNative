@@ -14,7 +14,7 @@ using torch::indexing::Slice;
 namespace at::cuda { TORCH_CUDA_CPP_API cudaDeviceProp* getCurrentDeviceProperties(); }
 
 Trainer::Trainer(Config config)
-    : cfg_(std::move(config)), actions_(static_cast<int>(HeatseekerEnv::action_table().size())),
+    : cfg_(std::move(config)), actions_(static_cast<int>(SoccarEnv::action_table().size())),
       device_(c10::cuda::device_count()>0?torch::kCUDA:torch::kCPU), net_(actions_), pool_(cfg_.env_threads),
       league_rng_(cfg_.seed ^ 0x9e3779b97f4a7c15ULL) {
     torch::set_num_threads(1);
@@ -22,7 +22,7 @@ Trainer::Trainer(Config config)
     net_->to(device_);
     optimizer_=std::make_unique<torch::optim::Adam>(net_->parameters(),torch::optim::AdamOptions(cfg_.lr).eps(1e-5));
     envs_.reserve(cfg_.envs);
-    for(int i=0;i<cfg_.envs;++i) envs_.push_back(std::make_unique<HeatseekerEnv>(cfg_,cfg_.seed+i*7919ULL));
+    for(int i=0;i<cfg_.envs;++i) envs_.push_back(std::make_unique<SoccarEnv>(cfg_,cfg_.seed+i*7919ULL));
     std::filesystem::create_directories(cfg_.checkpoints/"versions");
     load_latest();
 }

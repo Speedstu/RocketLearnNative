@@ -7,10 +7,6 @@ edition = "2024"
 name = "rocket-learn-supervisor"
 path = "supervisor/main.rs"
 
-[[bin]]
-name = "rocket-kuxir-supervisor"
-path = "supervisor/kuxir_main.rs"
-
 [profile.release]
 lto = "fat"
 codegen-units = 1

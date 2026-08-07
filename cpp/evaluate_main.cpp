@@ -1,5 +1,5 @@
 #include "config.h"
-#include "heatseeker_env.h"
+#include "soccar_env.h"
 #include "model.h"
 #include "thread_pool.h"
 
@@ -148,15 +148,15 @@ struct MatchStats {
 MatchStats play_batch(const Config& cfg, const fs::path& current_path,
                       const fs::path& opponent_path, uint64_t current_version,
                       int target_games) {
-    const int actions = static_cast<int>(HeatseekerEnv::action_table().size());
+    const int actions = static_cast<int>(SoccarEnv::action_table().size());
     auto current = load_policy(current_path, actions);
     auto opponent = load_policy(opponent_path, actions);
     constexpr int env_count = 16;
     ThreadPool pool(std::min(4, cfg.env_threads));
-    std::vector<std::unique_ptr<HeatseekerEnv>> envs;
+    std::vector<std::unique_ptr<SoccarEnv>> envs;
     const auto batch_salt = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
     for (int i = 0; i < env_count; ++i)
-        envs.push_back(std::make_unique<HeatseekerEnv>(cfg, current_version ^ batch_salt ^ (104729ULL * i)));
+        envs.push_back(std::make_unique<SoccarEnv>(cfg, current_version ^ batch_salt ^ (104729ULL * i)));
 
     const auto float_opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
     const auto bool_opts = torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU);

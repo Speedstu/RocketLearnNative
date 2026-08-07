@@ -27,7 +27,7 @@ struct Config {
     float max_grad_norm = 0.5f;
     float past_version_prob = 0.20f;
     std::filesystem::path meshes = "collision_meshes";
-    std::filesystem::path checkpoints = "checkpoints/heatseeker_from_scratch";
+    std::filesystem::path checkpoints = "checkpoints/soccar_2v2_from_scratch";
 
     static int env_int(const char* name, int fallback) {
         if (const char* s = std::getenv(name)) try { return std::stoi(s); } catch (...) {}
@@ -52,6 +52,7 @@ struct Config {
         c.save_every_updates = env_int("RLN_SAVE_EVERY", c.save_every_updates);
         c.version_every_updates = env_int("RLN_VERSION_EVERY", c.version_every_updates);
         c.opponent_refresh_updates = env_int("RLN_OPPONENT_REFRESH", c.opponent_refresh_updates);
+        c.max_episode_decisions = env_int("RLN_MAX_EPISODE_DECISIONS", c.max_episode_decisions);
         c.seed = env_int("RLN_SEED", c.seed);
         c.gamma = env_float("RLN_GAMMA", c.gamma);
         c.gae_lambda = env_float("RLN_GAE_LAMBDA", c.gae_lambda);
@@ -65,6 +66,10 @@ struct Config {
         c.checkpoints = env_path("RLN_CHECKPOINTS", c.checkpoints);
         c.envs = std::max(1, c.envs);
         c.env_threads = std::clamp(c.env_threads, 1, c.envs);
+        c.tick_skip = std::max(1, c.tick_skip);
+        c.rollout_decisions = std::max(1, c.rollout_decisions);
+        c.minibatch = std::max(1, c.minibatch);
+        c.max_episode_decisions = std::max(1, c.max_episode_decisions);
         c.past_version_prob = std::clamp(c.past_version_prob, 0.0f, 0.5f);
         c.opponent_refresh_updates = std::max(1, c.opponent_refresh_updates);
         return c;

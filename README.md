@@ -1,7 +1,59 @@
-# RocketLearn Native 
+# RocketLearn Native
 
-Native C++20/Rust implementation of the useful RocketLearn training loop, without Python, Redis, GigaLearn, or the Python GIL. The C++ process owns RocketSim environments, batched LibTorch inference, GAE/PPO learning, curriculum, metrics, and atomic checkpoints. The Rust supervisor owns lifecycle, logging, and crash recovery.
+Native C++20/Rust Rocket League reinforcement-learning trainer built around RocketSim and LibTorch.
 
-The design keeps RocketLearn's important training properties: PPO with GAE, stochastic discrete policy, shared self-play policy, observation/action masking, advantage normalization, automatic checkpoints, immutable policy versions, resume, and evaluation-ready version artifacts. On one machine it replaces serialized Redis rollouts with an in-process structure-of-arrays pipeline and one batched GPU call per decision step.
+The repository contains one clean baseline: **standard Soccar 2v2 self-play**. The training loop keeps PPO/GAE, stochastic discrete actions, batched inference, checkpoint resume/versioning, past-policy league sampling, and the TrueSkill evaluator.
 
-Generated builds, checkpoints, logs, SDK binaries, videos, and virtual environments are excluded from the repository. Clone with `--recurse-submodules` to obtain the optional legacy Python RocketSimVis visualizer.
+## Included
+
+- `rocket_learn_native`: Soccar 2v2 PPO trainer.
+- `rocket_learn_evaluator`: deterministic 2v2 checkpoint evaluator.
+- `rocket_learn_visualizer`: UDP playback sender for the Python renderer.
+- `RocketSimVis`: public Python RocketSimVis submodule.
+- Rust supervisor for restart/log handling.
+
+The private renderer source is not part of the active project.
+
+## Clone
+
+```bat
+git clone --recurse-submodules https://github.com/Speedstu/RocketLearnNative.git
+cd RocketLearnNative
+```
+
+For an existing clone:
+
+```bat
+git submodule update --init --recursive
+```
+
+## Build and train
+
+```bat
+BUILD.bat
+START_TRAINING.bat
+```
+
+## Evaluator
+
+```bat
+BUILD_EVALUATOR.bat
+START_EVALUATOR.bat
+```
+
+## Python RocketSimVis
+
+Install dependencies once:
+
+```bat
+python -m pip install -r RocketSimVis\requirements.txt
+```
+
+Then:
+
+```bat
+BUILD_VISUALIZER.bat
+START_VISUALIZER.bat
+```
+
+Playback uses the standard RocketSimVis JSON protocol over UDP port `9273`.

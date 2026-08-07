@@ -1,3 +1,3 @@
-[submodule "RocketSimVis_python_backup_20260803"]
-	path = RocketSimVis_python_backup_20260803
+[submodule "RocketSimVis"]
+	path = RocketSimVis
 	url = https://github.com/ZealanL/RocketSimVis.git
