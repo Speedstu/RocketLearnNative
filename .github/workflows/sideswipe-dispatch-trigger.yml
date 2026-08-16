@@ -1,0 +1,19 @@
+name: SideSwipe Pretrain Trigger
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    if: contains(github.event.issue.title, '[sideswipe-pretrain]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch SideSwipe cloud pretraining
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run sideswipe-cloud-pretrain.yml --ref sideswipe-pretrain
