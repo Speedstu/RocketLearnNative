@@ -1,0 +1,202 @@
+name: SideSwipe Champion Improve
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sideswipe-champion-improve
+  cancel-in-progress: false
+
+env:
+  SOURCE_SHA256: 6cfdcbee20581df966805f080437ffe533dd3b51676418b881ee7baf2342b96d
+  TORCH_VERSION: '2.13.0'
+
+jobs:
+  build-parent:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.issue.title, '[sideswipe-improve]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reconstruct verified source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat cloud_sideswipe/chunks/part_*.b64 | base64 -d > /tmp/sideswipe-src.tar.gz
+          echo "${SOURCE_SHA256}  /tmp/sideswipe-src.tar.gz" | sha256sum -c -
+          rm -rf cloud_sideswipe/src
+          mkdir -p cloud_sideswipe/src
+          tar -xzf /tmp/sideswipe-src.tar.gz -C cloud_sideswipe/src
+          cp cloud_sideswipe/promote_generation.py cloud_sideswipe/src/promote_generation.py
+      - name: Install CPU PyTorch
+        run: python -m pip install --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu "torch==${TORCH_VERSION}"
+      - name: Build trainer and evaluator
+        shell: bash
+        run: |
+          TORCH_PREFIX=$(python -c 'import torch; print(torch.utils.cmake_prefix_path)')
+          cmake -S cloud_sideswipe/src -B build -DCMAKE_PREFIX_PATH="$TORCH_PREFIX" -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j1
+      - name: Download current champion
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p parent
+          gh release download sideswipe-pretrain-latest --pattern sideswipe_pretrained_latest.pt --dir parent
+          mv parent/sideswipe_pretrained_latest.pt parent/latest.pt
+          test -s parent/latest.pt
+      - name: Parent checkpoint compatibility test
+        shell: bash
+        run: |
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          chmod +x build/sideswipe_eval build/sideswipe_train
+          ./build/sideswipe_eval --candidate parent/latest.pt --opponent parent/latest.pt --episodes 40 --team-size 1 --seed 2026083000 | tee parent/self_eval.log
+      - name: Upload parent and binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: champion-parent
+          path: |
+            parent/latest.pt
+            parent/self_eval.log
+            build/sideswipe_train
+            build/sideswipe_eval
+          retention-days: 30
+
+  challenger:
+    needs: build-parent
+    runs-on: ubuntu-latest
+    timeout-minutes: 170
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - name: balanced
+            seed: 20260831
+            lr: '0.000080'
+            entropy: '0.010'
+            past: '0.35'
+            ratio1v1: '0.67'
+            team_spirit: '0.30'
+            mech_scale: '0.60'
+          - name: duel
+            seed: 20260832
+            lr: '0.000070'
+            entropy: '0.008'
+            past: '0.40'
+            ratio1v1: '0.75'
+            team_spirit: '0.25'
+            mech_scale: '0.60'
+          - name: team
+            seed: 20260833
+            lr: '0.000080'
+            entropy: '0.009'
+            past: '0.35'
+            ratio1v1: '0.55'
+            team_spirit: '0.42'
+            mech_scale: '0.60'
+          - name: mechanics
+            seed: 20260834
+            lr: '0.000060'
+            entropy: '0.010'
+            past: '0.40'
+            ratio1v1: '0.67'
+            team_spirit: '0.30'
+            mech_scale: '0.72'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CPU PyTorch
+        run: python -m pip install --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu "torch==${TORCH_VERSION}"
+      - uses: actions/download-artifact@v4
+        with:
+          name: champion-parent
+          path: parent_artifact
+      - name: Fine-tune ${{ matrix.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x parent_artifact/build/sideswipe_train parent_artifact/build/sideswipe_eval
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          CKPT="$GITHUB_WORKSPACE/challengers/${{ matrix.name }}"
+          mkdir -p "$CKPT/versions"
+          cp parent_artifact/parent/latest.pt "$CKPT/latest.pt"
+          cp parent_artifact/parent/latest.pt "$CKPT/versions/000000000_parent.pt"
+          export RLS_SEED=${{ matrix.seed }}
+          export RLS_ENVS=1024 RLS_ENV_THREADS=4 RLS_TORCH_THREADS=4
+          export RLS_MIXED=1 RLS_RATIO_1V1=${{ matrix.ratio1v1 }} RLS_TRANSFER_SAFE_OBS=1
+          export RLS_TICK_SKIP=6 RLS_ROLLOUT_DECISIONS=128 RLS_EPOCHS=3 RLS_MINIBATCH=32768
+          export RLS_FORCE_STAGE=3 RLS_PAST_RATIO=${{ matrix.past }} RLS_PAST_POOL=16
+          export RLS_LR=${{ matrix.lr }} RLS_ENTROPY=${{ matrix.entropy }} RLS_TEAM_SPIRIT=${{ matrix.team_spirit }}
+          export RLS_MECH_LATE_SCALE=${{ matrix.mech_scale }}
+          export RLS_SAVE_EVERY=20 RLS_VERSION_EVERY=50
+          export RLS_CHECKPOINTS="$CKPT"
+          if [ "${{ matrix.name }}" = "mechanics" ]; then
+            export RLS_W_FLIP_RESET=2.20 RLS_W_PURPLE=1.55 RLS_W_MUSTY=0.24 RLS_W_AIR_DRIBBLE=0.40 RLS_W_RESET_SEEK=0.012
+          fi
+          parent_artifact/build/sideswipe_train --train-updates 260 2>&1 | tee "$CKPT/train.log"
+          test -s "$CKPT/latest.pt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: challenger-${{ matrix.name }}
+          path: |
+            challengers/${{ matrix.name }}/latest.pt
+            challengers/${{ matrix.name }}/metrics.tsv
+            challengers/${{ matrix.name }}/train.log
+          retention-days: 30
+
+  promote:
+    needs: challenger
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CPU PyTorch
+        run: python -m pip install --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu "torch==${TORCH_VERSION}"
+      - uses: actions/download-artifact@v4
+        with:
+          name: champion-parent
+          path: parent_artifact
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: challenger-*
+          path: challengers
+      - name: Conservative promotion tournament
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x parent_artifact/build/sideswipe_eval
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          python cloud_sideswipe/promote_generation.py challengers parent_artifact/build/sideswipe_eval parent_artifact/parent/latest.pt final_champion | tee generation_selection.log
+          cp final_champion/latest.pt sideswipe_pretrained_latest.pt
+          cp final_champion/generation_manifest.json generation_manifest.json
+      - name: Upload promoted champion
+        uses: actions/upload-artifact@v4
+        with:
+          name: sideswipe-improved-champion
+          path: |
+            sideswipe_pretrained_latest.pt
+            generation_manifest.json
+            generation_selection.log
+          retention-days: 90
+      - name: Update rolling champion release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload sideswipe-pretrain-latest sideswipe_pretrained_latest.pt generation_manifest.json --clobber
