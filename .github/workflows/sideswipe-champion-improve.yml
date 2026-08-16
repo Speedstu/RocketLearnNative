@@ -74,7 +74,7 @@ jobs:
   challenger:
     needs: build-parent
     runs-on: ubuntu-latest
-    timeout-minutes: 170
+    timeout-minutes: 300
     strategy:
       fail-fast: false
       max-parallel: 4
@@ -112,6 +112,27 @@ jobs:
             ratio1v1: '0.67'
             team_spirit: '0.30'
             mech_scale: '0.72'
+    env:
+      RLS_SEED: ${{ matrix.seed }}
+      RLS_ENVS: '1024'
+      RLS_ENV_THREADS: '4'
+      RLS_TORCH_THREADS: '4'
+      RLS_MIXED: '1'
+      RLS_RATIO_1V1: ${{ matrix.ratio1v1 }}
+      RLS_TRANSFER_SAFE_OBS: '1'
+      RLS_TICK_SKIP: '6'
+      RLS_ROLLOUT_DECISIONS: '128'
+      RLS_EPOCHS: '3'
+      RLS_MINIBATCH: '32768'
+      RLS_FORCE_STAGE: '3'
+      RLS_PAST_RATIO: ${{ matrix.past }}
+      RLS_PAST_POOL: '16'
+      RLS_LR: ${{ matrix.lr }}
+      RLS_ENTROPY: ${{ matrix.entropy }}
+      RLS_TEAM_SPIRIT: ${{ matrix.team_spirit }}
+      RLS_MECH_LATE_SCALE: ${{ matrix.mech_scale }}
+      RLS_SAVE_EVERY: '10'
+      RLS_VERSION_EVERY: '50'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -123,33 +144,87 @@ jobs:
         with:
           name: champion-parent
           path: parent_artifact
-      - name: Fine-tune ${{ matrix.name }}
+      - name: Initialize ${{ matrix.name }} from champion
         shell: bash
         run: |
           set -euo pipefail
           chmod +x parent_artifact/build/sideswipe_train parent_artifact/build/sideswipe_eval
-          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
           CKPT="$GITHUB_WORKSPACE/challengers/${{ matrix.name }}"
           mkdir -p "$CKPT/versions"
           cp parent_artifact/parent/latest.pt "$CKPT/latest.pt"
           cp parent_artifact/parent/latest.pt "$CKPT/versions/000000000_parent.pt"
-          export RLS_SEED=${{ matrix.seed }}
-          export RLS_ENVS=1024 RLS_ENV_THREADS=4 RLS_TORCH_THREADS=4
-          export RLS_MIXED=1 RLS_RATIO_1V1=${{ matrix.ratio1v1 }} RLS_TRANSFER_SAFE_OBS=1
-          export RLS_TICK_SKIP=6 RLS_ROLLOUT_DECISIONS=128 RLS_EPOCHS=3 RLS_MINIBATCH=32768
-          export RLS_FORCE_STAGE=3 RLS_PAST_RATIO=${{ matrix.past }} RLS_PAST_POOL=16
-          export RLS_LR=${{ matrix.lr }} RLS_ENTROPY=${{ matrix.entropy }} RLS_TEAM_SPIRIT=${{ matrix.team_spirit }}
-          export RLS_MECH_LATE_SCALE=${{ matrix.mech_scale }}
-          export RLS_SAVE_EVERY=20 RLS_VERSION_EVERY=50
-          export RLS_CHECKPOINTS="$CKPT"
+          : > "$CKPT/train.log"
+      - name: Segment 1/4 - ${{ matrix.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          export RLS_CHECKPOINTS="$GITHUB_WORKSPACE/challengers/${{ matrix.name }}"
           if [ "${{ matrix.name }}" = "mechanics" ]; then
             export RLS_W_FLIP_RESET=2.20 RLS_W_PURPLE=1.55 RLS_W_MUSTY=0.24 RLS_W_AIR_DRIBBLE=0.40 RLS_W_RESET_SEEK=0.012
           fi
-          parent_artifact/build/sideswipe_train --train-updates 260 2>&1 | tee "$CKPT/train.log"
-          test -s "$CKPT/latest.pt"
+          parent_artifact/build/sideswipe_train --train-updates 65 2>&1 | tee -a "$RLS_CHECKPOINTS/train.log"
+          test -s "$RLS_CHECKPOINTS/latest.pt"
       - uses: actions/upload-artifact@v4
         with:
-          name: challenger-${{ matrix.name }}
+          name: recovery-${{ matrix.name }}-01
+          path: |
+            challengers/${{ matrix.name }}/latest.pt
+            challengers/${{ matrix.name }}/metrics.tsv
+            challengers/${{ matrix.name }}/train.log
+          retention-days: 7
+      - name: Segment 2/4 - ${{ matrix.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          export RLS_CHECKPOINTS="$GITHUB_WORKSPACE/challengers/${{ matrix.name }}"
+          if [ "${{ matrix.name }}" = "mechanics" ]; then
+            export RLS_W_FLIP_RESET=2.20 RLS_W_PURPLE=1.55 RLS_W_MUSTY=0.24 RLS_W_AIR_DRIBBLE=0.40 RLS_W_RESET_SEEK=0.012
+          fi
+          parent_artifact/build/sideswipe_train --train-updates 65 2>&1 | tee -a "$RLS_CHECKPOINTS/train.log"
+          test -s "$RLS_CHECKPOINTS/latest.pt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recovery-${{ matrix.name }}-02
+          path: |
+            challengers/${{ matrix.name }}/latest.pt
+            challengers/${{ matrix.name }}/metrics.tsv
+            challengers/${{ matrix.name }}/train.log
+          retention-days: 7
+      - name: Segment 3/4 - ${{ matrix.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          export RLS_CHECKPOINTS="$GITHUB_WORKSPACE/challengers/${{ matrix.name }}"
+          if [ "${{ matrix.name }}" = "mechanics" ]; then
+            export RLS_W_FLIP_RESET=2.20 RLS_W_PURPLE=1.55 RLS_W_MUSTY=0.24 RLS_W_AIR_DRIBBLE=0.40 RLS_W_RESET_SEEK=0.012
+          fi
+          parent_artifact/build/sideswipe_train --train-updates 65 2>&1 | tee -a "$RLS_CHECKPOINTS/train.log"
+          test -s "$RLS_CHECKPOINTS/latest.pt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recovery-${{ matrix.name }}-03
+          path: |
+            challengers/${{ matrix.name }}/latest.pt
+            challengers/${{ matrix.name }}/metrics.tsv
+            challengers/${{ matrix.name }}/train.log
+          retention-days: 7
+      - name: Segment 4/4 - ${{ matrix.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          export RLS_CHECKPOINTS="$GITHUB_WORKSPACE/challengers/${{ matrix.name }}"
+          if [ "${{ matrix.name }}" = "mechanics" ]; then
+            export RLS_W_FLIP_RESET=2.20 RLS_W_PURPLE=1.55 RLS_W_MUSTY=0.24 RLS_W_AIR_DRIBBLE=0.40 RLS_W_RESET_SEEK=0.012
+          fi
+          parent_artifact/build/sideswipe_train --train-updates 65 2>&1 | tee -a "$RLS_CHECKPOINTS/train.log"
+          test -s "$RLS_CHECKPOINTS/latest.pt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: challenger-final-${{ matrix.name }}
           path: |
             challengers/${{ matrix.name }}/latest.pt
             challengers/${{ matrix.name }}/metrics.tsv
@@ -159,7 +234,7 @@ jobs:
   promote:
     needs: challenger
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -173,7 +248,7 @@ jobs:
           path: parent_artifact
       - uses: actions/download-artifact@v4
         with:
-          pattern: challenger-*
+          pattern: challenger-final-*
           path: challengers
       - name: Conservative promotion tournament
         shell: bash
