@@ -1,0 +1,94 @@
+--- a/cpp/sideswipe_play_main.cpp
++++ b/cpp/sideswipe_play_main.cpp
+@@ -527,6 +527,8 @@
+     int hz = 20;
+     std::string capture_backend;
+     std::string telemetry_path;
++    bool observe_only = false;
++    int max_consecutive_misses = 12;
+@@ -539,12 +541,17 @@
+         else if (a == "--capture") capture_backend = next();
+         else if (a == "--telemetry") telemetry_path = next();
+         else if (a == "--sample") deterministic = false;
++        else if (a == "--observe-only" || a == "--dry-run") observe_only = true;
++        else if (a == "--max-misses") max_consecutive_misses = std::max(1, std::atoi(next().c_str()));
+     }
+ 
+     Ini ini;
+     ini.load(ini_path);
+     if (capture_backend.empty()) capture_backend = ini.str("capture_backend", "stream");
++
++    const int reference_width = std::max(1, ini.num("reference_width", 1920));
++    const int reference_height = std::max(1, ini.num("reference_height", 1080));
+@@ -584,7 +591,8 @@
+     SideSwipeNet net(actions);
+     net->eval();
+     {
+-        const auto path = cfg.checkpoints / "latest.pt";
++        std::filesystem::path path = cfg.checkpoints;
++        if (!std::filesystem::is_regular_file(path)) path /= "latest.pt";
+@@ -611,7 +619,8 @@
+     SideSwipeEnv env(cfg, 12345);
+     const std::string device = ini.str("touch_device", detect_touch_device(serial));
+-    std::cout << "[play] serial=" << serial << " team=" << team << " touch=" << device << " hz=" << hz << '\n';
++    std::cout << "[play] serial=" << serial << " team=" << team << " touch=" << device << " hz=" << hz
++              << " observe_only=" << (observe_only ? 1 : 0) << '\n';
+@@ -654,6 +663,8 @@
+     auto last = std::chrono::steady_clock::now();
+     uint64_t frames = 0;
+     uint64_t misses = 0;
++    int consecutive_misses = 0;
++    bool geometry_scaled = false;
+@@ -691,6 +702,23 @@
+         }
+         touch.set_screen_size(f.w, f.h);
++        if (!geometry_scaled) {
++            const float sx_scale = static_cast<float>(f.w) / static_cast<float>(reference_width);
++            const float sy_scale = static_cast<float>(f.h) / static_cast<float>(reference_height);
++            map.px_left *= sx_scale; map.px_right *= sx_scale;
++            map.px_floor *= sy_scale; map.px_ceiling *= sy_scale;
++            pad.stick_x = static_cast<int>(std::lround(pad.stick_x * sx_scale));
++            pad.stick_y = static_cast<int>(std::lround(pad.stick_y * sy_scale));
++            pad.stick_r = static_cast<int>(std::lround(pad.stick_r * std::min(sx_scale, sy_scale)));
++            pad.jump_x = static_cast<int>(std::lround(pad.jump_x * sx_scale));
++            pad.jump_y = static_cast<int>(std::lround(pad.jump_y * sy_scale));
++            pad.boost_x = static_cast<int>(std::lround(pad.boost_x * sx_scale));
++            pad.boost_y = static_cast<int>(std::lround(pad.boost_y * sy_scale));
++            geometry_scaled = true;
++            std::cout << "[geometry] frame=" << f.w << "x" << f.h
++                      << " ref=" << reference_width << "x" << reference_height
++                      << " scale=" << sx_scale << "," << sy_scale << '\n';
++        }
+@@ -716,13 +744,19 @@
+         const Blob orange = tracked(orange_color, last_orange_screen, 240);
+         if (ball.count < min_pixels || blue.count < min_pixels || orange.count < min_pixels) {
+             ++misses;
++            ++consecutive_misses;
+             touch.set(0, false, 0, 0);
+             touch.set(1, false, 0, 0);
+             touch.set(2, false, 0, 0);
+             touch.flush();
++            if (consecutive_misses == max_consecutive_misses)
++                std::cerr << "[watchdog] tracking lost for " << consecutive_misses << " frames; controls released\n";
+             std::this_thread::sleep_for(period);
+             continue;
+         }
++        if (consecutive_misses >= max_consecutive_misses)
++            std::cout << "[watchdog] tracking recovered after " << consecutive_misses << " misses\n";
++        consecutive_misses = 0;
+@@ -843,10 +877,14 @@
+         const int sx = pad.stick_x + static_cast<int>(stick.x * pad.stick_r);
+         const int sy = pad.stick_y - static_cast<int>(stick.y * pad.stick_r);
+ 
+-        touch.set(0, stick.active, sx, sy);
+-        touch.set(1, ctl.jump, pad.jump_x, pad.jump_y);
+-        touch.set(2, ctl.boost, pad.boost_x, pad.boost_y);
+-        touch.flush();
++        if (!observe_only) {
++            touch.set(0, stick.active, sx, sy);
++            touch.set(1, ctl.jump, pad.jump_x, pad.jump_y);
++            touch.set(2, ctl.boost, pad.boost_x, pad.boost_y);
++            touch.flush();
++        } else {
++            touch.release_all();
++        }
