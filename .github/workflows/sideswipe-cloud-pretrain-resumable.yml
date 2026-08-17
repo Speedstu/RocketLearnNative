@@ -1,0 +1,327 @@
+name: SideSwipe Cloud Pretrain Resumable
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sideswipe-cloud-pretrain-resumable
+  cancel-in-progress: false
+
+env:
+  SOURCE_SHA256: 6cfdcbee20581df966805f080437ffe533dd3b51676418b881ee7baf2342b96d
+  TORCH_VERSION: '2.13.0'
+
+jobs:
+  build-smoke:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.issue.title, '[sideswipe-pretrain-v2]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reconstruct verified source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat cloud_sideswipe/chunks/part_*.b64 | base64 -d > /tmp/sideswipe-src.tar.gz
+          echo "${SOURCE_SHA256}  /tmp/sideswipe-src.tar.gz" | sha256sum -c -
+          rm -rf cloud_sideswipe/src
+          mkdir -p cloud_sideswipe/src
+          tar -xzf /tmp/sideswipe-src.tar.gz -C cloud_sideswipe/src
+      - name: Install CPU PyTorch
+        run: python -m pip install --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu "torch==${TORCH_VERSION}"
+      - name: Build trainer and evaluator
+        shell: bash
+        run: |
+          TORCH_PREFIX=$(python -c 'import torch; print(torch.utils.cmake_prefix_path)')
+          cmake -S cloud_sideswipe/src -B build -DCMAKE_PREFIX_PATH="$TORCH_PREFIX" -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j1
+      - name: PPO smoke test
+        shell: bash
+        run: |
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          export RLS_ENVS=32 RLS_ENV_THREADS=4 RLS_TORCH_THREADS=2 RLS_TRANSFER_SAFE_OBS=1
+          export RLS_CHECKPOINTS="$GITHUB_WORKSPACE/smoke-checkpoint"
+          ./build/sideswipe_train --smoke | tee smoke.log
+          test -s smoke-checkpoint/latest.pt
+      - name: Upload tested binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: sideswipe-linux-binaries-v2
+          path: |
+            build/sideswipe_train
+            build/sideswipe_eval
+          retention-days: 7
+
+  pretrain:
+    needs: build-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        seed: [20260816, 20260817, 20260818, 20260819]
+    env:
+      RLS_SEED: ${{ matrix.seed }}
+      RLS_ENVS: '1024'
+      RLS_ENV_THREADS: '4'
+      RLS_TORCH_THREADS: '4'
+      RLS_MIXED: '1'
+      RLS_RATIO_1V1: '0.67'
+      RLS_TRANSFER_SAFE_OBS: '1'
+      RLS_TICK_SKIP: '6'
+      RLS_ROLLOUT_DECISIONS: '128'
+      RLS_EPOCHS: '3'
+      RLS_MINIBATCH: '32768'
+      RLS_PAST_RATIO: '0.22'
+      RLS_PAST_POOL: '12'
+      RLS_STAGE1_M: '20'
+      RLS_STAGE2_M: '60'
+      RLS_STAGE3_M: '120'
+      RLS_SAVE_EVERY: '10'
+      RLS_VERSION_EVERY: '100'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CPU PyTorch
+        run: python -m pip install --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu "torch==${TORCH_VERSION}"
+      - uses: actions/download-artifact@v4
+        with:
+          name: sideswipe-linux-binaries-v2
+          path: build
+      - name: Initialize seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x build/sideswipe_train build/sideswipe_eval
+          CKPT="$GITHUB_WORKSPACE/checkpoints/${{ matrix.seed }}"
+          mkdir -p "$CKPT"
+          : > "$CKPT/train.log"
+      - name: Segment 1/4 - seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          export RLS_CHECKPOINTS="$GITHUB_WORKSPACE/checkpoints/${{ matrix.seed }}"
+          ./build/sideswipe_train --train-updates 130 2>&1 | tee -a "$RLS_CHECKPOINTS/train.log"
+          test -s "$RLS_CHECKPOINTS/latest.pt"
+      - name: Recovery 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: pretrain-recovery-${{ matrix.seed }}-01
+          path: |
+            checkpoints/${{ matrix.seed }}/latest.pt
+            checkpoints/${{ matrix.seed }}/metrics.tsv
+            checkpoints/${{ matrix.seed }}/train.log
+          retention-days: 7
+      - name: Segment 2/4 - seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          export RLS_CHECKPOINTS="$GITHUB_WORKSPACE/checkpoints/${{ matrix.seed }}"
+          ./build/sideswipe_train --train-updates 130 2>&1 | tee -a "$RLS_CHECKPOINTS/train.log"
+          test -s "$RLS_CHECKPOINTS/latest.pt"
+      - name: Recovery 2
+        uses: actions/upload-artifact@v4
+        with:
+          name: pretrain-recovery-${{ matrix.seed }}-02
+          path: |
+            checkpoints/${{ matrix.seed }}/latest.pt
+            checkpoints/${{ matrix.seed }}/metrics.tsv
+            checkpoints/${{ matrix.seed }}/train.log
+          retention-days: 7
+      - name: Segment 3/4 - seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          export RLS_CHECKPOINTS="$GITHUB_WORKSPACE/checkpoints/${{ matrix.seed }}"
+          ./build/sideswipe_train --train-updates 130 2>&1 | tee -a "$RLS_CHECKPOINTS/train.log"
+          test -s "$RLS_CHECKPOINTS/latest.pt"
+      - name: Recovery 3
+        uses: actions/upload-artifact@v4
+        with:
+          name: pretrain-recovery-${{ matrix.seed }}-03
+          path: |
+            checkpoints/${{ matrix.seed }}/latest.pt
+            checkpoints/${{ matrix.seed }}/metrics.tsv
+            checkpoints/${{ matrix.seed }}/train.log
+          retention-days: 7
+      - name: Segment 4/4 - seed ${{ matrix.seed }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          export RLS_CHECKPOINTS="$GITHUB_WORKSPACE/checkpoints/${{ matrix.seed }}"
+          ./build/sideswipe_train --train-updates 130 2>&1 | tee -a "$RLS_CHECKPOINTS/train.log"
+          test -s "$RLS_CHECKPOINTS/latest.pt"
+      - name: Upload final seed checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: seed-${{ matrix.seed }}
+          path: |
+            checkpoints/${{ matrix.seed }}/latest.pt
+            checkpoints/${{ matrix.seed }}/metrics.tsv
+            checkpoints/${{ matrix.seed }}/train.log
+          retention-days: 30
+
+  tournament:
+    needs: pretrain
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reconstruct verified source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat cloud_sideswipe/chunks/part_*.b64 | base64 -d > /tmp/sideswipe-src.tar.gz
+          echo "${SOURCE_SHA256}  /tmp/sideswipe-src.tar.gz" | sha256sum -c -
+          rm -rf cloud_sideswipe/src && mkdir -p cloud_sideswipe/src
+          tar -xzf /tmp/sideswipe-src.tar.gz -C cloud_sideswipe/src
+      - name: Install CPU PyTorch
+        run: python -m pip install --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu "torch==${TORCH_VERSION}"
+      - uses: actions/download-artifact@v4
+        with:
+          name: sideswipe-linux-binaries-v2
+          path: build
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: seed-*
+          path: artifacts
+      - name: Tournament 1v1 and 2v2
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x build/sideswipe_eval
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          python cloud_sideswipe/src/tournament.py artifacts ./build/sideswipe_eval | tee tournament.log
+          test -s champion/latest.pt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: champion-base
+          path: |
+            champion/latest.pt
+            champion/manifest.json
+            champion/metrics.tsv
+            champion/train.log
+            tournament.log
+          if-no-files-found: warn
+          retention-days: 30
+
+  refine-release:
+    needs: tournament
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      RLS_SEED: '2026081699'
+      RLS_ENVS: '1024'
+      RLS_ENV_THREADS: '4'
+      RLS_TORCH_THREADS: '4'
+      RLS_MIXED: '1'
+      RLS_RATIO_1V1: '0.67'
+      RLS_TRANSFER_SAFE_OBS: '1'
+      RLS_TICK_SKIP: '6'
+      RLS_ROLLOUT_DECISIONS: '128'
+      RLS_EPOCHS: '3'
+      RLS_MINIBATCH: '32768'
+      RLS_PAST_RATIO: '0.28'
+      RLS_PAST_POOL: '12'
+      RLS_FORCE_STAGE: '3'
+      RLS_SAVE_EVERY: '10'
+      RLS_VERSION_EVERY: '100'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reconstruct verified source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat cloud_sideswipe/chunks/part_*.b64 | base64 -d > /tmp/sideswipe-src.tar.gz
+          echo "${SOURCE_SHA256}  /tmp/sideswipe-src.tar.gz" | sha256sum -c -
+          rm -rf cloud_sideswipe/src && mkdir -p cloud_sideswipe/src
+          tar -xzf /tmp/sideswipe-src.tar.gz -C cloud_sideswipe/src
+      - name: Install CPU PyTorch
+        run: python -m pip install --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu "torch==${TORCH_VERSION}"
+      - uses: actions/download-artifact@v4
+        with:
+          name: sideswipe-linux-binaries-v2
+          path: build
+      - uses: actions/download-artifact@v4
+        with:
+          name: champion-base
+          path: champion_base
+      - name: Initialize refinement
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x build/sideswipe_train build/sideswipe_eval
+          mkdir -p champion_refined
+          cp champion_base/latest.pt champion_refined/latest.pt
+          : > champion_refined/refine.log
+      - name: Refinement 1/2
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          export RLS_CHECKPOINTS="$GITHUB_WORKSPACE/champion_refined"
+          ./build/sideswipe_train --train-updates 110 2>&1 | tee -a champion_refined/refine.log
+          test -s champion_refined/latest.pt
+      - name: Upload refinement recovery
+        uses: actions/upload-artifact@v4
+        with:
+          name: champion-refinement-recovery
+          path: |
+            champion_refined/latest.pt
+            champion_refined/metrics.tsv
+            champion_refined/refine.log
+          retention-days: 7
+      - name: Refinement 2/2 and selection
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          export RLS_CHECKPOINTS="$GITHUB_WORKSPACE/champion_refined"
+          ./build/sideswipe_train --train-updates 110 2>&1 | tee -a champion_refined/refine.log
+          python cloud_sideswipe/src/select_refined.py | tee refine_selection.log
+          cp final_champion/latest.pt sideswipe_pretrained_latest.pt
+      - name: Upload final checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: sideswipe-pretrained-champion
+          path: |
+            sideswipe_pretrained_latest.pt
+            final_champion/refine_manifest.json
+            champion_refined/refine.log
+            refine_selection.log
+          retention-days: 90
+      - name: Publish rolling prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release delete sideswipe-pretrain-latest --yes --cleanup-tag >/dev/null 2>&1 || true
+          gh release create sideswipe-pretrain-latest \
+            sideswipe_pretrained_latest.pt \
+            final_champion/refine_manifest.json \
+            --target "$GITHUB_SHA" \
+            --title "SideSwipe Pretrained Champion" \
+            --notes "Resumable multi-seed PPO self-play champion selected by deterministic 1v1/2v2 tournament, then advanced-stage refinement gated against the base champion. Contract 2026081602. Strong bootstrap checkpoint; no unverified rank claim." \
+            --prerelease
