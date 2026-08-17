@@ -1,0 +1,16 @@
+{
+  "module": "libUE4.so",
+  "guobject_offset": null,
+  "gname_offset": null,
+  "validated": false,
+  "offline_only": true,
+  "state": {
+    "ball": {},
+    "cars": []
+  },
+  "controls": {
+    "enabled": false,
+    "fields": {}
+  },
+  "notes": "Fail-closed template. Run DISCOVER_INTERNAL.bat in Exhibition. Do not enable writes until mappings are validated on the installed Sideswipe build."
+}

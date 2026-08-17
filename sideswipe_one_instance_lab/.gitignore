@@ -1,0 +1,12 @@
+android-sdk/
+bin/
+backup/
+checkpoints/*.pt
+logs/*
+!logs/.gitkeep
+tools/cache/
+tools/libtorch/
+bridge/build/
+config/state.json
+config/gadget_backend.json
+config/runtime_profile.suggested.json
