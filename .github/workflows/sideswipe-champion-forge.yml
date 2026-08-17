@@ -1,0 +1,344 @@
+name: SideSwipe Champion Forge
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sideswipe-champion-forge
+  cancel-in-progress: false
+
+env:
+  SOURCE_SHA256: 6cfdcbee20581df966805f080437ffe533dd3b51676418b881ee7baf2342b96d
+  TORCH_VERSION: '2.13.0'
+
+jobs:
+  build-parent:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.issue.title, '[sideswipe-forge]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reconstruct verified source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat cloud_sideswipe/chunks/part_*.b64 | base64 -d > /tmp/sideswipe-src.tar.gz
+          echo "${SOURCE_SHA256}  /tmp/sideswipe-src.tar.gz" | sha256sum -c -
+          rm -rf cloud_sideswipe/src
+          mkdir -p cloud_sideswipe/src
+          tar -xzf /tmp/sideswipe-src.tar.gz -C cloud_sideswipe/src
+      - name: Install CPU PyTorch
+        run: python -m pip install --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu "torch==${TORCH_VERSION}"
+      - name: Build trainer and evaluator
+        shell: bash
+        run: |
+          TORCH_PREFIX=$(python -c 'import torch; print(torch.utils.cmake_prefix_path)')
+          cmake -S cloud_sideswipe/src -B build -DCMAKE_PREFIX_PATH="$TORCH_PREFIX" -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j1
+      - name: Download current rolling champion
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p parent
+          gh release download sideswipe-pretrain-latest --pattern sideswipe_pretrained_latest.pt --dir parent
+          mv parent/sideswipe_pretrained_latest.pt parent/latest.pt
+          test -s parent/latest.pt
+          sha256sum parent/latest.pt | tee parent/sha256.txt
+      - name: Parent compatibility self-test
+        shell: bash
+        run: |
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          chmod +x build/sideswipe_eval build/sideswipe_train
+          ./build/sideswipe_eval --candidate parent/latest.pt --opponent parent/latest.pt --episodes 80 --team-size 1 --seed 2026090001 | tee parent/self_eval_1v1.log
+          ./build/sideswipe_eval --candidate parent/latest.pt --opponent parent/latest.pt --episodes 60 --team-size 2 --seed 2026090002 | tee parent/self_eval_2v2.log
+      - name: Upload parent and binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-parent
+          path: |
+            parent/latest.pt
+            parent/sha256.txt
+            parent/self_eval_1v1.log
+            parent/self_eval_2v2.log
+            build/sideswipe_train
+            build/sideswipe_eval
+          retention-days: 30
+
+  challenger:
+    needs: build-parent
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - name: hybrid-duel
+            seed: 20260911
+            lr: '0.000045'
+            entropy: '0.0070'
+            past: '0.48'
+            ratio1v1: '0.72'
+            team_spirit: '0.32'
+            mech_scale: '0.76'
+            gamma: '0.9970'
+            gae: '0.960'
+            clip: '0.18'
+            w_flip: '2.30'
+            w_purple: '1.60'
+            w_musty: '0.26'
+            w_air: '0.44'
+            w_reset: '0.013'
+          - name: hybrid-team
+            seed: 20260912
+            lr: '0.000045'
+            entropy: '0.0080'
+            past: '0.48'
+            ratio1v1: '0.58'
+            team_spirit: '0.42'
+            mech_scale: '0.76'
+            gamma: '0.9970'
+            gae: '0.960'
+            clip: '0.18'
+            w_flip: '2.30'
+            w_purple: '1.60'
+            w_musty: '0.26'
+            w_air: '0.44'
+            w_reset: '0.013'
+          - name: balanced-plus
+            seed: 20260913
+            lr: '0.000050'
+            entropy: '0.0085'
+            past: '0.45'
+            ratio1v1: '0.65'
+            team_spirit: '0.36'
+            mech_scale: '0.78'
+            gamma: '0.9970'
+            gae: '0.960'
+            clip: '0.18'
+            w_flip: '2.35'
+            w_purple: '1.65'
+            w_musty: '0.27'
+            w_air: '0.46'
+            w_reset: '0.013'
+          - name: mechanics-plus
+            seed: 20260914
+            lr: '0.000040'
+            entropy: '0.0075'
+            past: '0.50'
+            ratio1v1: '0.66'
+            team_spirit: '0.34'
+            mech_scale: '0.84'
+            gamma: '0.9970'
+            gae: '0.965'
+            clip: '0.17'
+            w_flip: '2.55'
+            w_purple: '1.80'
+            w_musty: '0.30'
+            w_air: '0.50'
+            w_reset: '0.015'
+          - name: conservative
+            seed: 20260915
+            lr: '0.000030'
+            entropy: '0.0060'
+            past: '0.55'
+            ratio1v1: '0.65'
+            team_spirit: '0.36'
+            mech_scale: '0.74'
+            gamma: '0.9980'
+            gae: '0.970'
+            clip: '0.15'
+            w_flip: '2.25'
+            w_purple: '1.55'
+            w_musty: '0.25'
+            w_air: '0.43'
+            w_reset: '0.012'
+          - name: long-horizon
+            seed: 20260916
+            lr: '0.000040'
+            entropy: '0.0070'
+            past: '0.50'
+            ratio1v1: '0.63'
+            team_spirit: '0.38'
+            mech_scale: '0.76'
+            gamma: '0.9985'
+            gae: '0.975'
+            clip: '0.18'
+            w_flip: '2.30'
+            w_purple: '1.60'
+            w_musty: '0.26'
+            w_air: '0.45'
+            w_reset: '0.013'
+          - name: duel-preserve
+            seed: 20260917
+            lr: '0.000040'
+            entropy: '0.0065'
+            past: '0.55'
+            ratio1v1: '0.76'
+            team_spirit: '0.36'
+            mech_scale: '0.76'
+            gamma: '0.9975'
+            gae: '0.965'
+            clip: '0.17'
+            w_flip: '2.35'
+            w_purple: '1.60'
+            w_musty: '0.26'
+            w_air: '0.44'
+            w_reset: '0.013'
+          - name: team-preserve
+            seed: 20260918
+            lr: '0.000045'
+            entropy: '0.0075'
+            past: '0.52'
+            ratio1v1: '0.56'
+            team_spirit: '0.46'
+            mech_scale: '0.78'
+            gamma: '0.9975'
+            gae: '0.965'
+            clip: '0.17'
+            w_flip: '2.35'
+            w_purple: '1.65'
+            w_musty: '0.27'
+            w_air: '0.46'
+            w_reset: '0.013'
+    env:
+      RLS_SEED_BASE: ${{ matrix.seed }}
+      RLS_ENVS: '1024'
+      RLS_ENV_THREADS: '4'
+      RLS_TORCH_THREADS: '4'
+      RLS_MIXED: '1'
+      RLS_RATIO_1V1: ${{ matrix.ratio1v1 }}
+      RLS_TRANSFER_SAFE_OBS: '1'
+      RLS_TICK_SKIP: '6'
+      RLS_ROLLOUT_DECISIONS: '128'
+      RLS_EPOCHS: '3'
+      RLS_MINIBATCH: '32768'
+      RLS_FORCE_STAGE: '3'
+      RLS_PAST_RATIO: ${{ matrix.past }}
+      RLS_PAST_POOL: '20'
+      RLS_LR: ${{ matrix.lr }}
+      RLS_ENTROPY: ${{ matrix.entropy }}
+      RLS_TEAM_SPIRIT: ${{ matrix.team_spirit }}
+      RLS_MECH_LATE_SCALE: ${{ matrix.mech_scale }}
+      RLS_GAMMA: ${{ matrix.gamma }}
+      RLS_GAE_LAMBDA: ${{ matrix.gae }}
+      RLS_CLIP: ${{ matrix.clip }}
+      RLS_W_FLIP_RESET: ${{ matrix.w_flip }}
+      RLS_W_PURPLE: ${{ matrix.w_purple }}
+      RLS_W_MUSTY: ${{ matrix.w_musty }}
+      RLS_W_AIR_DRIBBLE: ${{ matrix.w_air }}
+      RLS_W_RESET_SEEK: ${{ matrix.w_reset }}
+      RLS_SAVE_EVERY: '10'
+      RLS_VERSION_EVERY: '50'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CPU PyTorch
+        run: python -m pip install --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu "torch==${TORCH_VERSION}"
+      - uses: actions/download-artifact@v4
+        with:
+          name: forge-parent
+          path: parent_artifact
+      - name: Initialize ${{ matrix.name }} from champion
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x parent_artifact/build/sideswipe_train parent_artifact/build/sideswipe_eval
+          CKPT="$GITHUB_WORKSPACE/challengers/${{ matrix.name }}"
+          mkdir -p "$CKPT/versions"
+          cp parent_artifact/parent/latest.pt "$CKPT/latest.pt"
+          cp parent_artifact/parent/latest.pt "$CKPT/versions/000000000_parent.pt"
+          : > "$CKPT/train.log"
+      - name: Train first half - ${{ matrix.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          export RLS_CHECKPOINTS="$GITHUB_WORKSPACE/challengers/${{ matrix.name }}"
+          export RLS_SEED=$((RLS_SEED_BASE + GITHUB_RUN_NUMBER * 1000 + 1))
+          parent_artifact/build/sideswipe_train --train-updates 140 2>&1 | tee -a "$RLS_CHECKPOINTS/train.log"
+          test -s "$RLS_CHECKPOINTS/latest.pt"
+      - name: Upload half recovery
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-recovery-${{ matrix.name }}-half
+          path: |
+            challengers/${{ matrix.name }}/latest.pt
+            challengers/${{ matrix.name }}/metrics.tsv
+            challengers/${{ matrix.name }}/train.log
+          retention-days: 14
+      - name: Train second half - ${{ matrix.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          export RLS_CHECKPOINTS="$GITHUB_WORKSPACE/challengers/${{ matrix.name }}"
+          export RLS_SEED=$((RLS_SEED_BASE + GITHUB_RUN_NUMBER * 1000 + 2))
+          parent_artifact/build/sideswipe_train --train-updates 140 2>&1 | tee -a "$RLS_CHECKPOINTS/train.log"
+          test -s "$RLS_CHECKPOINTS/latest.pt"
+      - name: Upload final challenger
+        uses: actions/upload-artifact@v4
+        with:
+          name: challenger-final-${{ matrix.name }}
+          path: |
+            challengers/${{ matrix.name }}/latest.pt
+            challengers/${{ matrix.name }}/metrics.tsv
+            challengers/${{ matrix.name }}/train.log
+          retention-days: 30
+
+  promote:
+    needs: challenger
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CPU PyTorch
+        run: python -m pip install --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu "torch==${TORCH_VERSION}"
+      - uses: actions/download-artifact@v4
+        with:
+          name: forge-parent
+          path: parent_artifact
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: challenger-final-*
+          path: challengers
+      - name: Multi-seed conservative promotion tournament
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x parent_artifact/build/sideswipe_eval
+          export LD_LIBRARY_PATH=$(python -c 'import torch,pathlib; print(pathlib.Path(torch.__file__).parent/"lib")'):${LD_LIBRARY_PATH:-}
+          python cloud_sideswipe/promote_generation.py challengers parent_artifact/build/sideswipe_eval parent_artifact/parent/latest.pt final_champion | tee generation_selection.log
+          cp final_champion/latest.pt sideswipe_pretrained_latest.pt
+          cp final_champion/generation_manifest.json generation_manifest.json
+      - name: Upload forge champion
+        uses: actions/upload-artifact@v4
+        with:
+          name: sideswipe-forged-champion
+          path: |
+            sideswipe_pretrained_latest.pt
+            generation_manifest.json
+            generation_selection.log
+          retention-days: 90
+      - name: Update rolling champion release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload sideswipe-pretrain-latest sideswipe_pretrained_latest.pt generation_manifest.json --clobber
