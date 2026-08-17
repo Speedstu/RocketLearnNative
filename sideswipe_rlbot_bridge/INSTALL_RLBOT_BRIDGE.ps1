@@ -28,7 +28,6 @@ $copies=@(
  @{from='sideswipe\realgame.ini'; to='sideswipe\realgame.ini'},
  @{from='sideswipe\START_SIDESWIPE_RLBOT.bat'; to='sideswipe\START_SIDESWIPE_RLBOT.bat'},
  @{from='sideswipe\START_SIDESWIPE_RLBOT_OBSERVE.bat'; to='sideswipe\START_SIDESWIPE_RLBOT_OBSERVE.bat'},
- @{from='sideswipe\START_SIDESWIPE_RLBOT_BOTVBOT.bat'; to='sideswipe\START_SIDESWIPE_RLBOT_BOTVBOT.bat'},
  @{from='tools\SETUP_REALGAME.ps1'; to='tools\SETUP_REALGAME.ps1'},
  @{from='tools\DIAGNOSE_SIDESWIPE_RLBOT.ps1'; to='tools\DIAGNOSE_SIDESWIPE_RLBOT.ps1'}
 )
