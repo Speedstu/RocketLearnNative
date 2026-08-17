@@ -18,6 +18,7 @@ FIELD_RE = re.compile(r'\b(W|L|D)=([0-9]+)')
 SCORE_RE = re.compile(r'\bscore=([0-9.]+)')
 Z = 1.645
 MODE_WEIGHT = {1: 0.60, 2: 0.40}
+MIN_MODE_SCORE = {1: 0.505, 2: 0.505}
 
 
 def evaluate(candidate: Path, mode: int, episodes: int, seed: int):
@@ -44,23 +45,43 @@ def evaluate(candidate: Path, mode: int, episodes: int, seed: int):
 
 
 def aggregate(rows):
-    scores = {r['mode']: r['score'] for r in rows}
-    ns = {r['mode']: r['episodes'] for r in rows}
-    combined = sum(MODE_WEIGHT[m] * scores[m] for m in MODE_WEIGHT)
-    variance_bound = sum((MODE_WEIGHT[m] ** 2) * 0.25 / ns[m] for m in MODE_WEIGHT)
+    by_mode = {}
+    for mode in MODE_WEIGHT:
+        subset = [r for r in rows if r['mode'] == mode]
+        if not subset:
+            raise RuntimeError(f'missing evaluation rows for mode {mode}')
+        n = sum(r['episodes'] for r in subset)
+        w = sum(r['wins'] for r in subset)
+        d = sum(r['draws'] for r in subset)
+        by_mode[mode] = {'episodes': n, 'score': (w + 0.5 * d) / n}
+
+    combined = sum(MODE_WEIGHT[m] * by_mode[m]['score'] for m in MODE_WEIGHT)
+    variance_bound = sum((MODE_WEIGHT[m] ** 2) * 0.25 / by_mode[m]['episodes'] for m in MODE_WEIGHT)
     lcb = combined - Z * math.sqrt(variance_bound)
-    qualifies = lcb > 0.5 and scores[1] >= 0.505 and scores[2] >= 0.490
+    qualifies = (
+        lcb > 0.5
+        and by_mode[1]['score'] >= MIN_MODE_SCORE[1]
+        and by_mode[2]['score'] >= MIN_MODE_SCORE[2]
+    )
     return {
-        'score_1v1': scores[1], 'score_2v2': scores[2],
-        'combined_score': combined, 'combined_lcb95': lcb,
+        'score_1v1': by_mode[1]['score'],
+        'score_2v2': by_mode[2]['score'],
+        'episodes_1v1': by_mode[1]['episodes'],
+        'episodes_2v2': by_mode[2]['episodes'],
+        'combined_score': combined,
+        'combined_lcb95': lcb,
         'qualifies': qualifies,
     }
 
+
 records = []
 for idx, c in enumerate(candidates):
+    seed0 = 2026090000 + idx * 100
     phase1 = [
-        evaluate(c / 'latest.pt', 1, 1000, 2026082000 + idx * 20 + 1),
-        evaluate(c / 'latest.pt', 2, 600, 2026082000 + idx * 20 + 2),
+        evaluate(c / 'latest.pt', 1, 600, seed0 + 11),
+        evaluate(c / 'latest.pt', 1, 600, seed0 + 12),
+        evaluate(c / 'latest.pt', 2, 400, seed0 + 21),
+        evaluate(c / 'latest.pt', 2, 400, seed0 + 22),
     ]
     agg1 = aggregate(phase1)
     rec = {'challenger': c.name, 'phase1': phase1, 'phase1_summary': agg1}
@@ -76,8 +97,10 @@ if qualified:
     best = qualified[0]
     c = root / best['challenger'] / 'latest.pt'
     phase2 = [
-        evaluate(c, 1, 1500, 2026089001),
-        evaluate(c, 2, 900, 2026089002),
+        evaluate(c, 1, 1000, 2026099001),
+        evaluate(c, 1, 1000, 2026099002),
+        evaluate(c, 2, 600, 2026099011),
+        evaluate(c, 2, 600, 2026099012),
     ]
     agg2 = aggregate(phase2)
     confirmation = {'challenger': best['challenger'], 'rows': phase2, 'summary': agg2}
@@ -92,7 +115,10 @@ manifest = {
         'mode_weights': MODE_WEIGHT,
         'one_sided_z': Z,
         'variance_bound_per_game': 0.25,
-        'requirements': 'combined LCB95 > 0.5, 1v1 >= 0.505, 2v2 >= 0.490; then repeat on fresh larger evaluation',
+        'minimum_mode_scores': MIN_MODE_SCORE,
+        'phase1': '2x600 1v1 + 2x400 2v2 per challenger',
+        'confirmation': '2x1000 1v1 + 2x600 2v2 on fresh seeds',
+        'requirements': 'combined LCB95 > 0.5 and both 1v1/2v2 raw score >= 0.505; then repeat on fresh larger evaluation',
     },
     'selected': selected,
     'challengers': records,
