@@ -4,7 +4,7 @@ $ErrorActionPreference='Stop'
 $Root=Get-LabRoot; $repoRoot=Split-Path $Root -Parent; $p=Get-AndroidPaths
 Start-LabEmulator
 if (-not (Test-SideswipeInstalled)) { throw 'Sideswipe non installé. Lance INSTALL_SIDESWIPE.bat.' }
-if (-not $Checkpoint) { $Checkpoint=& (Join-Path $PSScriptRoot 'fetch_champion.ps1') | Select-Object -Last 1 }
+if (-not $Checkpoint) { $Checkpoint=& (Join-Path $PSScriptRoot 'resolve_best_checkpoint.ps1') | Select-Object -Last 1 }
 & (Join-Path $repoRoot 'sideswipe_rlbot_bridge\INSTALL_RLBOT_BRIDGE.ps1') -Root $repoRoot
 $launcher=Join-Path $repoRoot 'sideswipe\START_SIDESWIPE_RLBOT.bat'
 if (-not (Test-Path $launcher)) { throw "Launcher vision absent après overlay: $launcher" }
