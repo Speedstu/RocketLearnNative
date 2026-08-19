@@ -1,0 +1,23 @@
+name: Actions Billing Probe
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  probe:
+    if: github.event.issue.number == 8 && github.event.comment.body == '[actions-billing-probe]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Confirm hosted runner started
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: gh issue comment "$ISSUE" --repo "$REPO" --body "[actions-billing-probe-ok] run=$RUN_ID"
