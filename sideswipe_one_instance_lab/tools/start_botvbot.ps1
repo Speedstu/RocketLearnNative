@@ -12,7 +12,7 @@ if (-not $prof.validated -or -not $prof.offline_only -or -not $prof.controls.ena
   Write-Host '[next] Lance DISCOVER_INTERNAL.bat en Exhibition. Le fallback START_POLICY_VS_NATIVE.bat reste disponible.'
   exit 4
 }
-if (-not $Blue) { $Blue=& (Join-Path $PSScriptRoot 'fetch_champion.ps1') | Select-Object -Last 1 }
+if (-not $Blue) { $Blue=& (Join-Path $PSScriptRoot 'resolve_best_checkpoint.ps1') | Select-Object -Last 1 }
 if (-not $Orange) { $Orange=$Blue }
 $gadget=Test-Path (Join-Path $Root 'config\gadget_backend.json')
 if ($gadget) {
