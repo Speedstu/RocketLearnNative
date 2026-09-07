@@ -8,62 +8,27 @@ on:
 jobs:
   passive-osint:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - name: Inspect public sources
+      - name: Probe public lookup API
         shell: bash
         run: |
-          set +e
-          EMAIL='enriqueariasgil@outlook.es'
-          mkdir -p out
-
-          echo '=== Vedbex page ==='
-          curl -L --max-time 30 -A 'Mozilla/5.0' -sS 'https://www.vedbex.com/tools/email2skype' -o out/vedbex.html
           python - <<'PY'
-          from pathlib import Path
-          from html.parser import HTMLParser
-          import re
-          s=Path('out/vedbex.html').read_text(errors='ignore')
-          print('len',len(s))
-          for line in s.splitlines():
-              if re.search(r'email2skype|resolve|ajax|fetch|\.php|api|email', line, re.I):
-                  print(line[:1000])
-          PY
-
-          echo '=== Try public form variants ==='
-          for data in "email=$EMAIL" "mail=$EMAIL" "email=$EMAIL&submit=Resolve" "value=$EMAIL&type=email"; do
-            echo "--- POST $data"
-            curl -L --max-time 30 -A 'Mozilla/5.0' -sS -X POST -d "$data" 'https://www.vedbex.com/tools/email2skype' > out/post.html
-            python - <<'PY'
-          from pathlib import Path
-          import re
-          s=Path('out/post.html').read_text(errors='ignore')
-          for m in re.finditer(r'.{0,160}(?:skype|live:|enrique|created|register|outlook).{0,220}', s, re.I|re.S):
-              print(re.sub(r'\s+',' ',m.group(0))[:600])
-          PY
-          done
-
-          echo '=== Holehe passive account checks ==='
-          python -m pip install --disable-pip-version-check -q holehe
-          holehe "$EMAIL" --only-used 2>&1 | head -n 250
-
-          echo '=== Public search snippets ==='
-          python - <<'PY'
-          import requests, urllib.parse, re
-          qs = [
-              '"enriqueariasgil@outlook.es" skype',
-              '"enriqueariasgil@outlook.es" "creation date"',
-              '"enriqueariasgil" skype',
-              '"Desinformador Ruso" youtube',
-          ]
-          for q in qs:
-              print('\nQUERY', q)
-              for engine, base in [('google','https://www.google.com/search?q='),('bing','https://www.bing.com/search?q=')]:
-                  try:
-                      r=requests.get(base+urllib.parse.quote(q),headers={'User-Agent':'Mozilla/5.0'},timeout=20)
-                      txt=re.sub(r'<[^>]+>',' ',r.text)
-                      txt=re.sub(r'\s+',' ',txt)
-                      print(engine, r.status_code, txt[:3500])
-                  except Exception as e:
-                      print(engine,'ERR',e)
+          import requests,re,json,html
+          from urllib.parse import urlencode
+          s=requests.Session()
+          s.headers.update({'User-Agent':'Mozilla/5.0','Origin':'https://www.vedbex.com','Referer':'https://www.vedbex.com/tools/email2skype'})
+          page=s.get('https://www.vedbex.com/tools/email2skype',timeout=20).text
+          print('PAGE',len(page))
+          # Print the complete inline JS implementing token creation / request parameters.
+          for m in re.finditer(r'<script[^>]*>(.*?)</script>',page,re.I|re.S):
+              js=m.group(1)
+              if 'skypesearch' in js or 'token_hash' in js:
+                  print('=== INLINE_JS ===')
+                  print(js[:18000])
+          print('=== TOKEN ===')
+          r=s.get('https://api.vedbex.com/v2/token',timeout=20)
+          print('status',r.status_code)
+          print('headers',dict(r.headers))
+          print('body',r.text[:6000])
           PY
