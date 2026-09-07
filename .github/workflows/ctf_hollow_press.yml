@@ -1,0 +1,59 @@
+name: CTF Hollow Press passive OSINT
+
+on:
+  push:
+    branches: [ctf-hollow-press-20260907]
+  workflow_dispatch:
+
+jobs:
+  passive-osint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Inspect public sources
+        shell: bash
+        run: |
+          set -u
+          EMAIL='enriqueariasgil@outlook.es'
+          mkdir -p out
+
+          echo '=== Vedbex page ==='
+          curl -L --max-time 30 -A 'Mozilla/5.0' -sS 'https://www.vedbex.com/tools/email2skype' -o out/vedbex.html || true
+          grep -Eoi '<form[^>]*>|<script[^>]+src=[^>]+>|(action|method)=["'"'][^"'"']+' out/vedbex.html | head -n 100 || true
+          grep -Ein 'email2skype|resolve|ajax|fetch|\.php|api|email' out/vedbex.html | head -n 200 || true
+
+          echo '=== Try public form variants ==='
+          for data in \
+            "email=$EMAIL" \
+            "mail=$EMAIL" \
+            "email=$EMAIL&submit=Resolve" \
+            "value=$EMAIL&type=email"; do
+            echo "--- POST $data"
+            curl -L --max-time 30 -A 'Mozilla/5.0' -sS -X POST -d "$data" 'https://www.vedbex.com/tools/email2skype' | \
+              grep -Eio '.{0,120}(skype|live:|enrique|created|register|outlook).{0,180}' | head -n 40 || true
+          done
+
+          echo '=== Holehe passive account checks ==='
+          python -m pip install --disable-pip-version-check -q holehe || true
+          holehe "$EMAIL" --only-used 2>&1 | head -n 200 || true
+
+          echo '=== Public search-engine snippets through HTML endpoints ==='
+          python - <<'PY'
+          import requests, urllib.parse, re
+          qs = [
+              '"enriqueariasgil@outlook.es" skype',
+              '"enriqueariasgil@outlook.es" "creation date"',
+              '"enriqueariasgil" skype',
+              '"Desinformador Ruso" youtube',
+          ]
+          for q in qs:
+              print('\nQUERY', q)
+              u='https://www.google.com/search?q='+urllib.parse.quote(q)
+              try:
+                  r=requests.get(u,headers={'User-Agent':'Mozilla/5.0'},timeout=20)
+                  txt=re.sub(r'<[^>]+>',' ',r.text)
+                  txt=re.sub(r'\s+',' ',txt)
+                  print(txt[:3000])
+              except Exception as e:
+                  print('ERR',e)
+          PY
