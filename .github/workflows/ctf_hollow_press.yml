@@ -13,31 +13,41 @@ jobs:
       - name: Inspect public sources
         shell: bash
         run: |
-          set -u
+          set +e
           EMAIL='enriqueariasgil@outlook.es'
           mkdir -p out
 
           echo '=== Vedbex page ==='
-          curl -L --max-time 30 -A 'Mozilla/5.0' -sS 'https://www.vedbex.com/tools/email2skype' -o out/vedbex.html || true
-          grep -Eoi '<form[^>]*>|<script[^>]+src=[^>]+>|(action|method)=["'"'][^"'"']+' out/vedbex.html | head -n 100 || true
-          grep -Ein 'email2skype|resolve|ajax|fetch|\.php|api|email' out/vedbex.html | head -n 200 || true
+          curl -L --max-time 30 -A 'Mozilla/5.0' -sS 'https://www.vedbex.com/tools/email2skype' -o out/vedbex.html
+          python - <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          import re
+          s=Path('out/vedbex.html').read_text(errors='ignore')
+          print('len',len(s))
+          for line in s.splitlines():
+              if re.search(r'email2skype|resolve|ajax|fetch|\.php|api|email', line, re.I):
+                  print(line[:1000])
+          PY
 
           echo '=== Try public form variants ==='
-          for data in \
-            "email=$EMAIL" \
-            "mail=$EMAIL" \
-            "email=$EMAIL&submit=Resolve" \
-            "value=$EMAIL&type=email"; do
+          for data in "email=$EMAIL" "mail=$EMAIL" "email=$EMAIL&submit=Resolve" "value=$EMAIL&type=email"; do
             echo "--- POST $data"
-            curl -L --max-time 30 -A 'Mozilla/5.0' -sS -X POST -d "$data" 'https://www.vedbex.com/tools/email2skype' | \
-              grep -Eio '.{0,120}(skype|live:|enrique|created|register|outlook).{0,180}' | head -n 40 || true
+            curl -L --max-time 30 -A 'Mozilla/5.0' -sS -X POST -d "$data" 'https://www.vedbex.com/tools/email2skype' > out/post.html
+            python - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('out/post.html').read_text(errors='ignore')
+          for m in re.finditer(r'.{0,160}(?:skype|live:|enrique|created|register|outlook).{0,220}', s, re.I|re.S):
+              print(re.sub(r'\s+',' ',m.group(0))[:600])
+          PY
           done
 
           echo '=== Holehe passive account checks ==='
-          python -m pip install --disable-pip-version-check -q holehe || true
-          holehe "$EMAIL" --only-used 2>&1 | head -n 200 || true
+          python -m pip install --disable-pip-version-check -q holehe
+          holehe "$EMAIL" --only-used 2>&1 | head -n 250
 
-          echo '=== Public search-engine snippets through HTML endpoints ==='
+          echo '=== Public search snippets ==='
           python - <<'PY'
           import requests, urllib.parse, re
           qs = [
@@ -48,12 +58,12 @@ jobs:
           ]
           for q in qs:
               print('\nQUERY', q)
-              u='https://www.google.com/search?q='+urllib.parse.quote(q)
-              try:
-                  r=requests.get(u,headers={'User-Agent':'Mozilla/5.0'},timeout=20)
-                  txt=re.sub(r'<[^>]+>',' ',r.text)
-                  txt=re.sub(r'\s+',' ',txt)
-                  print(txt[:3000])
-              except Exception as e:
-                  print('ERR',e)
+              for engine, base in [('google','https://www.google.com/search?q='),('bing','https://www.bing.com/search?q=')]:
+                  try:
+                      r=requests.get(base+urllib.parse.quote(q),headers={'User-Agent':'Mozilla/5.0'},timeout=20)
+                      txt=re.sub(r'<[^>]+>',' ',r.text)
+                      txt=re.sub(r'\s+',' ',txt)
+                      print(engine, r.status_code, txt[:3500])
+                  except Exception as e:
+                      print(engine,'ERR',e)
           PY
