@@ -10,25 +10,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Probe public lookup API
+      - name: Inspect public client helper scripts
         shell: bash
         run: |
           python - <<'PY'
-          import requests,re,json,html
-          from urllib.parse import urlencode
+          import requests,re,urllib.parse
           s=requests.Session()
-          s.headers.update({'User-Agent':'Mozilla/5.0','Origin':'https://www.vedbex.com','Referer':'https://www.vedbex.com/tools/email2skype'})
-          page=s.get('https://www.vedbex.com/tools/email2skype',timeout=20).text
-          print('PAGE',len(page))
-          # Print the complete inline JS implementing token creation / request parameters.
-          for m in re.finditer(r'<script[^>]*>(.*?)</script>',page,re.I|re.S):
-              js=m.group(1)
-              if 'skypesearch' in js or 'token_hash' in js:
-                  print('=== INLINE_JS ===')
-                  print(js[:18000])
-          print('=== TOKEN ===')
-          r=s.get('https://api.vedbex.com/v2/token',timeout=20)
-          print('status',r.status_code)
-          print('headers',dict(r.headers))
-          print('body',r.text[:6000])
+          s.headers.update({'User-Agent':'Mozilla/5.0','Referer':'https://www.vedbex.com/tools/email2skype'})
+          u='https://www.vedbex.com/tools/email2skype'
+          page=s.get(u,timeout=20).text
+          srcs=re.findall(r'<script[^>]+src=["\']([^"\']+)',page,re.I)
+          print('SCRIPTS',srcs)
+          for src in srcs:
+              url=urllib.parse.urljoin(u,src)
+              try:
+                  txt=s.get(url,timeout=20).text
+              except Exception as e:
+                  print('ERR',url,e); continue
+              if 'lastindexOf' in txt or 'lastIndexOf' in txt or 'var string' in txt or 'string =' in txt:
+                  print('\n===',url,'len',len(txt),'===')
+                  for pat in ['lastindexOf','lastIndexOf','var string','string =']:
+                      for m in re.finditer(re.escape(pat),txt,re.I):
+                          a=max(0,m.start()-1200); b=min(len(txt),m.start()+3000)
+                          print(txt[a:b])
           PY
