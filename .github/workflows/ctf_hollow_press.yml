@@ -10,27 +10,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Inspect public client helper scripts
+      - name: Inspect generic public Skype resolver UI
         shell: bash
         run: |
           python - <<'PY'
-          import requests,re,urllib.parse
-          s=requests.Session()
-          s.headers.update({'User-Agent':'Mozilla/5.0','Referer':'https://www.vedbex.com/tools/email2skype'})
-          u='https://www.vedbex.com/tools/email2skype'
-          page=s.get(u,timeout=20).text
-          srcs=re.findall(r'<script[^>]+src=["\']([^"\']+)',page,re.I)
-          print('SCRIPTS',srcs)
-          for src in srcs:
-              url=urllib.parse.urljoin(u,src)
+          import requests,re
+          pages=[
+            'https://www.vedbex.com/skyperesolver',
+            'https://www.vedbex.com/tools/skyperesolver'
+          ]
+          for u in pages:
               try:
-                  txt=s.get(url,timeout=20).text
+                  r=requests.get(u,headers={'User-Agent':'Mozilla/5.0'},timeout=20)
+                  print('\n===',u,r.status_code,len(r.text),'===')
+                  text=r.text
+                  for needle in ['registration','timestamp','created','skype_id','skype_name','country','results','resolve']:
+                      if needle.lower() in text.lower():
+                          print('FOUND',needle)
+                  for m in re.finditer(r'.{0,400}(?:registration|timestamp|created|skype_id|skype_name|results).{0,900}',text,re.I|re.S):
+                      print(re.sub(r'\s+',' ',m.group(0))[:1600])
               except Exception as e:
-                  print('ERR',url,e); continue
-              if 'lastindexOf' in txt or 'lastIndexOf' in txt or 'var string' in txt or 'string =' in txt:
-                  print('\n===',url,'len',len(txt),'===')
-                  for pat in ['lastindexOf','lastIndexOf','var string','string =']:
-                      for m in re.finditer(re.escape(pat),txt,re.I):
-                          a=max(0,m.start()-1200); b=min(len(txt),m.start()+3000)
-                          print(txt[a:b])
+                  print('ERR',u,e)
           PY
