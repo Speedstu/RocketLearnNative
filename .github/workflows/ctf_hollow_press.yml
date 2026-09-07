@@ -10,27 +10,30 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Inspect public app request flow
+      - name: Inspect generic Microsoft result rendering
         shell: bash
         run: |
           python - <<'PY'
           import requests,re,urllib.parse
           h={'User-Agent':'Mozilla/5.0'}
-          u='https://app.osint.industries/'
-          s=requests.get(u,headers=h,timeout=30).text
-          print('HTML',len(s))
-          srcs=re.findall(r'<script[^>]+src=["\']([^"\']+)',s,re.I)
-          print('SCRIPTS',len(srcs))
+          base='https://app.osint.industries/'
+          html=requests.get(base,headers=h,timeout=30).text
+          srcs=re.findall(r'<script[^>]+src=["\']([^"\']+)',html,re.I)
           for src in srcs:
-              url=urllib.parse.urljoin(u,src)
-              try: txt=requests.get(url,headers=h,timeout=30).text
-              except Exception as e: print('ERR',url,e); continue
-              needles=['/v2/request','api.osint.industries','performance','searchParams','query','selector']
-              if any(n.lower() in txt.lower() for n in needles):
-                  print('\n===',url,'LEN',len(txt),'===')
-                  for needle in needles:
-                      for m in list(re.finditer(re.escape(needle),txt,re.I))[:10]:
-                          a=max(0,m.start()-900); b=min(len(txt),m.end()+1800)
-                          print('---',needle,'---')
-                          print(txt[a:b].replace('\n',' ')[:3000])
+              url=urllib.parse.urljoin(base,src)
+              try:
+                  txt=requests.get(url,headers=h,timeout=30).text
+              except Exception as e:
+                  print('ERR',url,e); continue
+              needles=['MICROSOFT','Creation Date','Account Creation Date','Last Seen','Created At','apiKey','x-api-key','Authorization','selector']
+              hits=[]
+              for needle in needles:
+                  for m in re.finditer(re.escape(needle),txt,re.I):
+                      hits.append((m.start(),needle))
+              if not hits: continue
+              print('\n===',url,'LEN',len(txt),'===')
+              for pos,needle in sorted(hits)[:80]:
+                  a=max(0,pos-1200); b=min(len(txt),pos+3200)
+                  print('\n---',needle,'@',pos,'---')
+                  print(txt[a:b].replace('\n',' ')[:4400])
           PY
